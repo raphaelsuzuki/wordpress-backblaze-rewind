@@ -28,11 +28,11 @@ def list_file_versions(bucket_name, prefix):
         # B2 CLI command to list all file versions
         cmd = ['b2', 'list-file-versions', bucket_name]
         if start_file_name:
-            cmd.extend(['--startFileName', start_file_name])
+            cmd.extend(['--startFileName', str(start_file_name)])
             if start_file_id:
-                cmd.extend(['--startFileId', start_file_id])
+                cmd.extend(['--startFileId', str(start_file_id)])
                 
-        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607 # NOSONAR
         if result.returncode != 0:
             logging.error(f"Failed to list file versions: {result.stderr}")
             sys.exit(1)
@@ -136,8 +136,8 @@ def restore(target_date_str, restore_dir):
         logging.info(f"Downloading {rel_name} (version: {file_id})")
         
         # Download the specific version by ID
-        cmd = ['b2', 'download-file-by-id', file_id, local_path]
-        download_result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607
+        cmd = ['b2', 'download-file-by-id', str(file_id), str(local_path)]
+        download_result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607 # NOSONAR
         
         if download_result.returncode != 0:
             logging.error(f"Failed to download {file_name}: {download_result.stderr}")

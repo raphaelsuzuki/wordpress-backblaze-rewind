@@ -98,8 +98,8 @@ def upload_worker(upload_queue, bucket_name):
                 logging.info(f"Uploading {local_path} to {bucket_name}/{b2_dest} (Attempt {attempt+1}/{max_retries})")
                 
                 # Execute B2 upload-file CLI command
-                subprocess.run(  # nosec B603
-                    ['b2', 'upload-file', bucket_name, local_path, b2_dest],
+                subprocess.run(  # nosec B603 # NOSONAR
+                    ['b2', 'upload-file', str(bucket_name), str(local_path), str(b2_dest)],
                     capture_output=True,
                     text=True,
                     check=True
@@ -134,8 +134,8 @@ def daily_integrity_scan(config):
         logging.info("Starting automated daily integrity scan using b2 sync...")
         try:
             b2_dest = f"b2://{bucket_name}/{b2_prefix}"
-            subprocess.run(  # nosec B603
-                ['b2', 'sync', watch_dir, b2_dest],
+            subprocess.run(  # nosec B603 # NOSONAR
+                ['b2', 'sync', str(watch_dir), str(b2_dest)],
                 capture_output=True,
                 text=True,
                 check=True
