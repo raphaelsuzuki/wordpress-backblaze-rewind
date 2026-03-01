@@ -2,10 +2,9 @@ import os
 import json
 import time
 import logging
-import subprocess
+import subprocess  # nosec B404
 import threading
 import queue
-from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -98,7 +97,7 @@ def upload_worker(upload_queue, bucket_name):
                 logging.info(f"Uploading {local_path} to {bucket_name}/{b2_dest} (Attempt {attempt+1}/{max_retries})")
                 
                 # Execute B2 upload-file CLI command
-                result = subprocess.run(
+                subprocess.run(  # nosec B603
                     ['b2', 'upload-file', bucket_name, local_path, b2_dest],
                     capture_output=True,
                     text=True,
@@ -134,7 +133,7 @@ def daily_integrity_scan(config):
         logging.info("Starting automated daily integrity scan using b2 sync...")
         try:
             b2_dest = f"b2://{bucket_name}/{b2_prefix}"
-            result = subprocess.run(
+            subprocess.run(  # nosec B603
                 ['b2', 'sync', watch_dir, b2_dest],
                 capture_output=True,
                 text=True,

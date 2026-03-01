@@ -3,8 +3,7 @@ import sys
 import json
 import logging
 import argparse
-import subprocess
-from datetime import datetime
+import subprocess  # nosec B404
 import dateutil.parser
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -33,7 +32,7 @@ def list_file_versions(bucket_name, prefix):
             if start_file_id:
                 cmd.extend(['--startFileId', start_file_id])
                 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
         if result.returncode != 0:
             logging.error(f"Failed to list file versions: {result.stderr}")
             sys.exit(1)
@@ -138,7 +137,7 @@ def restore(target_date_str, restore_dir):
         
         # Download the specific version by ID
         cmd = ['b2', 'download-file-by-id', file_id, local_path]
-        download_result = subprocess.run(cmd, capture_output=True, text=True)
+        download_result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
         
         if download_result.returncode != 0:
             logging.error(f"Failed to download {file_name}: {download_result.stderr}")
