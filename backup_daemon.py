@@ -153,9 +153,6 @@ def main():
         return
 
     watch_dir = config['watch_dir']
-    if not os.path.exists(watch_dir):
-        logging.error(f"Watch directory does not exist: {watch_dir}. Please create it or fix the config.")
-        sys.exit(1)
     
     # Initialize queue and worker
     upload_queue = queue.Queue()
@@ -169,7 +166,11 @@ def main():
     # Initialize Watchdog
     event_handler = BackupHandler(upload_queue, watch_dir, config['b2_path_prefix'])
     observer = Observer()
-    observer.schedule(event_handler, watch_dir, recursive=True)
+    try:
+        observer.schedule(event_handler, watch_dir, recursive=True)
+    except Exception as e:
+        logging.error(f"Watch directory error ({watch_dir}): {e}. Please create it or fix the config.")
+        sys.exit(1)
     observer.start()
     
     logging.info(f"Started monitoring {watch_dir}...")
