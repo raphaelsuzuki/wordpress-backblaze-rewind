@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import logging
@@ -153,9 +154,8 @@ def main():
 
     watch_dir = config['watch_dir']
     if not os.path.exists(watch_dir):
-        logging.error(f"Watch directory does not exist: {watch_dir}")
-        logging.info("Attempting to create the watch directory structure (for testing)...")
-        os.makedirs(watch_dir, exist_ok=True)
+        logging.error(f"Watch directory does not exist: {watch_dir}. Please create it or fix the config.")
+        sys.exit(1)
     
     # Initialize queue and worker
     upload_queue = queue.Queue()
