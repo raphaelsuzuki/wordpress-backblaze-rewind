@@ -1,0 +1,23 @@
+[Unit]
+Description=Backblaze B2 WordPress Media Backup Daemon
+After=network.target
+
+[Service]
+Type=simple
+# Consider running as the user that owns the wp-content/uploads directory (e.g., www-data)
+User=www-data
+Group=www-data
+
+# Update this path to where you cloned the repository
+WorkingDirectory=/opt/wordpress-backblaze-rewind
+
+# Make sure you have the required python packages installed (or use a venv)
+ExecStart=/usr/bin/python3 /opt/wordpress-backblaze-rewind/backup_daemon.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=b2-backup-daemon
+
+[Install]
+WantedBy=multi-user.target
