@@ -25,6 +25,15 @@ def load_config():
     with open(CONFIG_PATH, 'r') as f:
         return json.load(f)
 
+
+def validate_config_for_daemon(config):
+    """Ensure required config keys are present for the daemon to start."""
+    required = ['watch_dir', 'bucket_name', 'b2_path_prefix']
+    missing = [k for k in required if k not in config or not config.get(k)]
+    if missing:
+        logging.error(f"Missing required config keys for daemon: {', '.join(missing)}")
+        sys.exit(1)
+
 class BackupHandler(FileSystemEventHandler):
     def __init__(self, upload_queue, watch_dir, b2_prefix):
         super().__init__()
@@ -64,16 +73,25 @@ class BackupHandler(FileSystemEventHandler):
             # We treat a move as a new creation at the destination
             filepath = event.dest_path
             try:
-                rel_path = os.path.relpath(filepath, self.watch_dir)
+                dest_real = os.path.realpath(filepath)
+                watch_real = os.path.realpath(self.watch_dir)
+                # ensure dest is under watch_dir
+                if os.path.commonpath([watch_real, dest_real]) != watch_real:
+                    logging.warning(f"Moved destination outside watch_dir, skipping upload: {event.dest_path}")
+                    return
+
+                rel_path = os.path.relpath(dest_real, self.watch_dir)
                 b2_dest = f"{self.b2_prefix}/{rel_path}".replace("\\", "/")
-                
+
                 self.upload_queue.put({
                     'action': 'upload',
-                    'local_path': filepath,
+                    'local_path': dest_real,
                     'b2_dest': b2_dest
                 })
             except ValueError as e:
                 logging.error(f"Error calculating relative path for {filepath}: {e}")
+            except Exception as e:
+                logging.exception(f"Error validating moved path containment: {e}")
 
 def upload_worker(upload_queue, bucket_name):
     """Processes uploads from the queue with exponential backoff retries."""
@@ -96,7 +114,7 @@ def upload_worker(upload_queue, bucket_name):
         for attempt in range(max_retries):
             try:
                 logging.info(f"Uploading {local_path} to {bucket_name}/{b2_dest} (Attempt {attempt+1}/{max_retries})")
-                
+
                 # Execute B2 upload-file CLI command
                 subprocess.run(  # nosec B603 # NOSONAR
                     ['b2', 'upload-file', str(bucket_name), str(local_path), str(b2_dest)],
@@ -106,19 +124,23 @@ def upload_worker(upload_queue, bucket_name):
                 )
                 logging.info(f"Successfully uploaded {local_path}")
                 break
-                
+
             except subprocess.CalledProcessError as e:
                 logging.error(f"Upload failed for {local_path}. Exit code: {e.returncode}")
                 logging.error(f"STDOUT: {e.stdout}")
                 logging.error(f"STDERR: {e.stderr}")
-                
-                if attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    logging.info(f"Retrying in {sleep_time} seconds...")
-                    time.sleep(sleep_time)
-                else:
-                    logging.error(f"Max retries reached for {local_path}. Giving up.")
-                    
+
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+                logging.exception(f"Exception during upload for bucket={bucket_name}, local_path={local_path}, b2_dest={b2_dest}: {e}")
+
+            # Retry logic (same for all exceptions above)
+            if attempt < max_retries - 1:
+                sleep_time = base_delay * (2 ** attempt)
+                logging.info(f"Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+            else:
+                logging.error(f"Max retries reached for {local_path}. Giving up.")
+
         upload_queue.task_done()
 
 def daily_integrity_scan(config):
@@ -144,6 +166,8 @@ def daily_integrity_scan(config):
         except subprocess.CalledProcessError as e:
             logging.error(f"Integrity scan failed. Exit code: {e.returncode}")
             logging.error(f"STDERR: {e.stderr}")
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            logging.exception(f"Exception during integrity scan for bucket={bucket_name}: {e}")
 
 def main():
     try:

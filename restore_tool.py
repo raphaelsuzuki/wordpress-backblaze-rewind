@@ -61,6 +61,12 @@ def list_file_versions(bucket_name, prefix):
 
 def restore(target_date_str, restore_dir):
     config = load_config()
+    # Validate required config keys
+    missing = [k for k in ('bucket_name', 'b2_path_prefix') if k not in config or not config.get(k)]
+    if missing:
+        logging.error(f"Missing required config key(s): {', '.join(missing)}")
+        sys.exit(1)
+
     bucket_name = config['bucket_name']
     prefix = config['b2_path_prefix']
     
@@ -114,8 +120,9 @@ def restore(target_date_str, restore_dir):
             
     logging.info(f"Found {len(to_download)} files to restore out of {len(file_history)} unique files.")
     
-    if not os.path.exists(restore_dir):
-        os.makedirs(restore_dir)
+    abs_restore_dir = os.path.abspath(restore_dir)
+    if not os.path.exists(abs_restore_dir):
+        os.makedirs(abs_restore_dir, exist_ok=True)
         
     # Download the selected versions
     for v in to_download:
@@ -126,10 +133,19 @@ def restore(target_date_str, restore_dir):
         rel_name = file_name
         if rel_name.startswith(prefix + '/'):
             rel_name = rel_name[len(prefix)+1:]
-            
-        local_path = os.path.join(restore_dir, rel_name)
+
+        # Compute normalized absolute path and ensure it is within restore_dir
+        candidate = os.path.normpath(os.path.join(abs_restore_dir, rel_name))
+        try:
+            if os.path.commonpath([abs_restore_dir, candidate]) != abs_restore_dir:
+                logging.error(f"Skipping restore for {file_name}: resolved path outside restore_dir -> {candidate}")
+                continue
+        except Exception as e:
+            logging.exception(f"Path containment check failed for {file_name}: {e}")
+            continue
+
+        local_path = candidate
         local_dir = os.path.dirname(local_path)
-        
         if not os.path.exists(local_dir):
             os.makedirs(local_dir, exist_ok=True)
             
@@ -137,12 +153,16 @@ def restore(target_date_str, restore_dir):
         
         # Download the specific version by ID
         cmd = ['b2', 'download-file-by-id', str(file_id), str(local_path)]
-        download_result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607 # NOSONAR
-        
-        if download_result.returncode != 0:
-            logging.error(f"Failed to download {file_name}: {download_result.stderr}")
-            
-    logging.info("Restore process completed.")
+        try:
+            download_result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607 # NOSONAR
+            if download_result.returncode != 0:
+                logging.error(f"Failed to download {file_name}: {download_result.stderr}")
+                # Treat as failure and exit later with non-zero
+                raise RuntimeError(f"Download failed for {file_name}")
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError, RuntimeError) as e:
+            logging.exception(f"Exception during download for {file_name}: {e}")
+            sys.exit(1)
+    logging.info("Restore process completed successfully.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Restore WP media from Backblaze B2 by point-in-time date.")
