@@ -1,0 +1,5 @@
+test_bin/
+.tmp_
+__pycache__/
+.pytest_cache/
+*.pyc

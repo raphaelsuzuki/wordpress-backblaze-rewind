@@ -5,13 +5,16 @@ import logging
 import argparse
 import subprocess  # nosec B404
 import dateutil.parser
+import datetime as dt
+import time
+
+from config_utils import load_config
+
+# Timeouts (seconds)
+SUBPROCESS_TIMEOUT_LIST = 120
+SUBPROCESS_TIMEOUT_DOWNLOAD = 300
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-def load_config():
-    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-    with open(config_path, 'r') as f:
-        return json.load(f)
 
 def list_file_versions(bucket_name, prefix):
     """
@@ -32,9 +35,13 @@ def list_file_versions(bucket_name, prefix):
             if start_file_id:
                 cmd.extend(['--startFileId', str(start_file_id)])
                 
-        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607 # NOSONAR
-        if result.returncode != 0:
-            logging.error(f"Failed to list file versions: {result.stderr}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_LIST)  # nosec B603 B607 # NOSONAR
+            if result.returncode != 0:
+                logging.error(f"Failed to list file versions: {result.stderr}")
+                sys.exit(1)
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            logging.exception(f"Exception invoking b2 list-file-versions for bucket={bucket_name}: {e}")
             sys.exit(1)
             
         try:
@@ -52,8 +59,8 @@ def list_file_versions(bucket_name, prefix):
             if not start_file_name:
                 break
                 
-        except json.JSONDecodeError:
-            logging.error("Failed to parse JSON. This tool expects B2 CLI JSON output format.")
+        except json.JSONDecodeError as e:
+            logging.exception("Failed to parse JSON. This tool expects B2 CLI JSON output format.")
             logging.error(f"CLI Output chunk: {result.stdout[:200]}")
             sys.exit(1)
             
@@ -73,15 +80,13 @@ def restore(target_date_str, restore_dir):
     # Parse target date and convert to milliseconds timestamp
     try:
         target_dt = dateutil.parser.parse(target_date_str)
-        # Assume local if timezone isn't specified, but fallback to naive
+        # Assume UTC if timezone isn't specified
         if target_dt.tzinfo is None:
-            # Assume UTC for safety if not specified
-            import datetime as dt
             target_dt = target_dt.replace(tzinfo=dt.timezone.utc)
-            
+
         target_ts = target_dt.timestamp() * 1000
     except Exception as e:
-        logging.error(f"Failed to parse target date '{target_date_str}': {e}")
+        logging.exception(f"Failed to parse target date '{target_date_str}': {e}")
         sys.exit(1)
         
     logging.info(f"Target date for restore: {target_dt} (Timestamp: {target_ts})")
@@ -124,7 +129,8 @@ def restore(target_date_str, restore_dir):
     if not os.path.exists(abs_restore_dir):
         os.makedirs(abs_restore_dir, exist_ok=True)
         
-    # Download the selected versions
+    # Download the selected versions with retry/backoff
+    failures = []
     for v in to_download:
         file_id = v['fileId']
         file_name = v['fileName']
@@ -150,18 +156,36 @@ def restore(target_date_str, restore_dir):
             os.makedirs(local_dir, exist_ok=True)
             
         logging.info(f"Downloading {rel_name} (version: {file_id})")
-        
-        # Download the specific version by ID
+
         cmd = ['b2', 'download-file-by-id', str(file_id), str(local_path)]
-        try:
-            download_result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 B607 # NOSONAR
-            if download_result.returncode != 0:
-                logging.error(f"Failed to download {file_name}: {download_result.stderr}")
-                # Treat as failure and exit later with non-zero
-                raise RuntimeError(f"Download failed for {file_name}")
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError, RuntimeError) as e:
-            logging.exception(f"Exception during download for {file_name}: {e}")
-            sys.exit(1)
+        max_retries = 5
+        base_delay = 2
+        success = False
+
+        for attempt in range(max_retries):
+            try:
+                download_result = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_DOWNLOAD)  # nosec B603 B607 # NOSONAR
+                if download_result.returncode == 0:
+                    logging.info(f"Downloaded {file_name} successfully")
+                    success = True
+                    break
+                else:
+                    logging.error(f"Failed to download {file_name} (rc={download_result.returncode}): {download_result.stderr}")
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+                logging.exception(f"Exception during download attempt {attempt+1} for {file_name}: {e}")
+
+            if attempt < max_retries - 1:
+                sleep_time = base_delay * (2 ** attempt)
+                logging.info(f"Retrying download of {file_name} in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+
+        if not success:
+            logging.error(f"Exhausted retries downloading {file_name}")
+            failures.append(file_name)
+    if failures:
+        logging.error(f"Restore completed with failures for {len(failures)} file(s): {failures}")
+        sys.exit(1)
+
     logging.info("Restore process completed successfully.")
 
 if __name__ == "__main__":

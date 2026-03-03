@@ -19,11 +19,11 @@ logging.basicConfig(
     ]
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
+from config_utils import load_config
 
-def load_config():
-    with open(CONFIG_PATH, 'r') as f:
-        return json.load(f)
+# Timeouts (seconds)
+SUBPROCESS_TIMEOUT_UPLOAD = 300
+SUBPROCESS_TIMEOUT_SYNC = 3600
 
 
 def validate_config_for_daemon(config):
@@ -120,7 +120,8 @@ def upload_worker(upload_queue, bucket_name):
                     ['b2', 'upload-file', str(bucket_name), str(local_path), str(b2_dest)],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    timeout=SUBPROCESS_TIMEOUT_UPLOAD
                 )
                 logging.info(f"Successfully uploaded {local_path}")
                 break
@@ -160,7 +161,8 @@ def daily_integrity_scan(config):
                 ['b2', 'sync', str(watch_dir), str(b2_dest)],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=SUBPROCESS_TIMEOUT_SYNC
             )
             logging.info("Daily integrity scan completed successfully.")
         except subprocess.CalledProcessError as e:
@@ -174,6 +176,16 @@ def main():
         config = load_config()
     except Exception as e:
         logging.error(f"Failed to load config.json: {e}")
+        return
+
+    # Validate config early to avoid KeyError later
+    try:
+        validate_config_for_daemon(config)
+    except SystemExit:
+        # validate_config_for_daemon calls sys.exit on failure; treat as clean exit
+        return
+    except Exception as e:
+        logging.exception(f"Config validation failed: {e}")
         return
 
     watch_dir = config['watch_dir']
