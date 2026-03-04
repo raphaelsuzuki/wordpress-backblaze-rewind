@@ -42,7 +42,7 @@ def test_restore_skips_path_traversal(monkeypatch, tmp_path):
             # should not be called
             raise RuntimeError('should not download')
 
-    monkeypatch.setattr(b2_client, 'B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
+    monkeypatch.setattr('restore_tool.B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
 
     restore_tool.restore('2021-01-01T00:00:00Z', str(tmp_path))
 
@@ -71,7 +71,7 @@ def test_restore_download_retries_and_succeeds(monkeypatch, tmp_path):
                 f.write('ok')
             return True
 
-    monkeypatch.setattr(b2_client, 'B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
+    monkeypatch.setattr('restore_tool.B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
 
     restore_tool.restore('2021-01-01T00:00:00Z', str(tmp_path))
 

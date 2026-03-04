@@ -70,12 +70,12 @@ def test_upload_worker_retries_and_continues(tmp_path, monkeypatch):
                 raise FileNotFoundError('b2 not found')
             return True
 
-    monkeypatch.setattr(b2_client, 'B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
+    monkeypatch.setattr('backup_daemon.B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
 
     q.put({'action': 'upload', 'local_path': local, 'b2_dest': 'uploads/file.txt'})
     q.put(None)
 
-    t = threading.Thread(target=upload_worker, args=(q, 'bucket'), daemon=True)
+    t = threading.Thread(target=upload_worker, args=(q, 'bucket', {}), daemon=True)
     t.start()
     t.join(timeout=5)
 

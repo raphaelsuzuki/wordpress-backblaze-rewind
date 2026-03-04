@@ -103,7 +103,7 @@ class BackupHandler(FileSystemEventHandler):
             except Exception as e:
                 logging.exception(f"Error validating moved path containment: {e}")
 
-def upload_worker(upload_queue, bucket_name):
+def upload_worker(upload_queue, bucket_name, config=None):
     """Processes uploads from the queue with exponential backoff retries."""
     while True:
         task = upload_queue.get()
@@ -124,8 +124,8 @@ def upload_worker(upload_queue, bucket_name):
         # Prefer SDK client if available; instantiate per worker on first use
         client = getattr(upload_worker, '_b2_client', None)
         if client is None:
-            client = B2Client.from_config()
-            setattr(upload_worker, '_b2_client', client)
+            client = B2Client.from_config(config or {})
+            upload_worker._b2_client = client
 
         for attempt in range(max_retries):
             try:
@@ -186,7 +186,7 @@ def main():
     
     # Initialize queue and worker
     upload_queue = queue.Queue()
-    worker_thread = threading.Thread(target=upload_worker, args=(upload_queue, config['bucket_name']), daemon=True)
+    worker_thread = threading.Thread(target=upload_worker, args=(upload_queue, config['bucket_name'], config), daemon=True)
     worker_thread.start()
     
     # Initialize integrity scanner
