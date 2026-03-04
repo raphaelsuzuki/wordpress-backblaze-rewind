@@ -46,6 +46,15 @@ class BackupHandler(FileSystemEventHandler):
             return
         
         filepath = event.src_path
+        try:
+            fp_real = os.path.realpath(filepath)
+            watch_real = os.path.realpath(self.watch_dir)
+            if os.path.commonpath([watch_real, fp_real]) != watch_real:
+                logging.warning(f"Event path outside watch_dir, skipping: {filepath}")
+                return
+        except Exception as e:
+            logging.exception(f"Error validating event path containment: {e}")
+            return
         # Calculate relative path to construct b2 destination
         try:
             rel_path = os.path.relpath(filepath, self.watch_dir)
@@ -175,18 +184,11 @@ def main():
     try:
         config = load_config()
     except Exception as e:
-        logging.error(f"Failed to load config.json: {e}")
-        return
+        logging.exception(f"Failed to load config.json: {e}")
+        sys.exit(1)
 
     # Validate config early to avoid KeyError later
-    try:
-        validate_config_for_daemon(config)
-    except SystemExit:
-        # validate_config_for_daemon calls sys.exit on failure; treat as clean exit
-        return
-    except Exception as e:
-        logging.exception(f"Config validation failed: {e}")
-        return
+    validate_config_for_daemon(config)
 
     watch_dir = config['watch_dir']
     

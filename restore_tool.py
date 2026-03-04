@@ -49,7 +49,13 @@ def list_file_versions(bucket_name, prefix):
             files = data.get('files', [])
             
             # Filter files by prefix and add to our list
-            filtered_files = [f for f in files if f['fileName'].startswith(prefix)]
+            # Match exact prefix or children under the prefix (avoid sibling matches)
+            def in_prefix(name, prefix):
+                if name == prefix:
+                    return True
+                return name.startswith(prefix + '/')
+
+            filtered_files = [f for f in files if in_prefix(f.get('fileName', ''), prefix)]
             versions.extend(filtered_files)
             
             start_file_name = data.get('nextFileName')
@@ -67,7 +73,14 @@ def list_file_versions(bucket_name, prefix):
     return versions
 
 def restore(target_date_str, restore_dir):
-    config = load_config()
+    try:
+        config = load_config()
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logging.exception(f"Failed to load config.json: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logging.exception(f"Failed to load config.json: {e}")
+        sys.exit(1)
     # Validate required config keys
     missing = [k for k in ('bucket_name', 'b2_path_prefix') if k not in config or not config.get(k)]
     if missing:
