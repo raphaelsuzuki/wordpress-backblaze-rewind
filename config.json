@@ -1,0 +1,5 @@
+{
+    "bucket_name": "wp-media-backups",
+    "watch_dir": "/var/www/html/wp-content/uploads",
+    "b2_path_prefix": "uploads"
+}
