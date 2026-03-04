@@ -1,10 +1,22 @@
 import os
 import queue
 import threading
-import time
 import types
 
 import pytest
+
+import b2_client
+import sys as _sys
+import types as _types
+
+# Provide a dummy `watchdog` module for tests if not installed in the environment.
+if 'watchdog' not in _sys.modules:
+    _watchdog = _types.SimpleNamespace()
+    _watchdog.observers = _types.SimpleNamespace(Observer=lambda *a, **k: _types.SimpleNamespace(schedule=lambda *a, **k: None, start=lambda *a, **k: None, stop=lambda *a, **k: None, join=lambda *a, **k: None))
+    _watchdog.events = _types.SimpleNamespace(FileSystemEventHandler=object)
+    _sys.modules['watchdog'] = _watchdog
+    _sys.modules['watchdog.observers'] = _watchdog.observers
+    _sys.modules['watchdog.events'] = _watchdog.events
 
 from backup_daemon import BackupHandler, validate_config_for_daemon, upload_worker
 
@@ -50,13 +62,15 @@ def test_upload_worker_retries_and_continues(tmp_path, monkeypatch):
 
     calls = {'n': 0}
 
-    def fake_run(cmd, capture_output=True, text=True, check=False, timeout=None):
-        calls['n'] += 1
-        if calls['n'] == 1:
-            raise FileNotFoundError('b2 not found')
-        return types.SimpleNamespace(returncode=0, stdout='', stderr='')
+    class FakeClient:
+        def upload_file(self, bucket_name, local_path, b2_dest):
+            calls['n'] += 1
+            if calls['n'] == 1:
+                # simulate missing CLI/SDK first
+                raise FileNotFoundError('b2 not found')
+            return True
 
-    monkeypatch.setattr('subprocess.run', fake_run)
+    monkeypatch.setattr(b2_client, 'B2Client', types.SimpleNamespace(from_config=lambda cfg=None: FakeClient()))
 
     q.put({'action': 'upload', 'local_path': local, 'b2_dest': 'uploads/file.txt'})
     q.put(None)

@@ -20,6 +20,7 @@ logging.basicConfig(
 )
 
 from config_utils import load_config
+from b2_client import B2Client
 
 # Timeouts (seconds)
 SUBPROCESS_TIMEOUT_UPLOAD = 300
@@ -119,31 +120,27 @@ def upload_worker(upload_queue, bucket_name):
 
         max_retries = 5
         base_delay = 2
-        
+
+        # Prefer SDK client if available; instantiate per worker on first use
+        client = getattr(upload_worker, '_b2_client', None)
+        if client is None:
+            client = B2Client.from_config()
+            setattr(upload_worker, '_b2_client', client)
+
         for attempt in range(max_retries):
             try:
                 logging.info(f"Uploading {local_path} to {bucket_name}/{b2_dest} (Attempt {attempt+1}/{max_retries})")
 
-                # Execute B2 upload-file CLI command
-                subprocess.run(  # nosec B603 # NOSONAR
-                    ['b2', 'upload-file', str(bucket_name), str(local_path), str(b2_dest)],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=SUBPROCESS_TIMEOUT_UPLOAD
-                )
-                logging.info(f"Successfully uploaded {local_path}")
-                break
+                ok = client.upload_file(bucket_name, local_path, b2_dest)
+                if ok:
+                    logging.info(f"Successfully uploaded {local_path}")
+                    break
+                else:
+                    logging.error(f"Upload failed for {local_path} via b2 client")
 
-            except subprocess.CalledProcessError as e:
-                logging.error(f"Upload failed for {local_path}. Exit code: {e.returncode}")
-                logging.error(f"STDOUT: {e.stdout}")
-                logging.error(f"STDERR: {e.stderr}")
-
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            except Exception as e:
                 logging.exception(f"Exception during upload for bucket={bucket_name}, local_path={local_path}, b2_dest={b2_dest}: {e}")
 
-            # Retry logic (same for all exceptions above)
             if attempt < max_retries - 1:
                 sleep_time = base_delay * (2 ** attempt)
                 logging.info(f"Retrying in {sleep_time} seconds...")
@@ -165,19 +162,14 @@ def daily_integrity_scan(config):
         
         logging.info("Starting automated daily integrity scan using b2 sync...")
         try:
-            b2_dest = f"b2://{bucket_name}/{b2_prefix}"
-            subprocess.run(  # nosec B603 # NOSONAR
-                ['b2', 'sync', str(watch_dir), str(b2_dest)],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=SUBPROCESS_TIMEOUT_SYNC
-            )
-            logging.info("Daily integrity scan completed successfully.")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Integrity scan failed. Exit code: {e.returncode}")
-            logging.error(f"STDERR: {e.stderr}")
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            # Use SDK-backed sync if available, otherwise fallback to CLI
+            client = B2Client.from_config(config)
+            ok = client.sync(watch_dir, bucket_name, b2_prefix)
+            if ok:
+                logging.info("Daily integrity scan completed successfully.")
+            else:
+                logging.error("Daily integrity scan failed.")
+        except Exception as e:
             logging.exception(f"Exception during integrity scan for bucket={bucket_name}: {e}")
 
 def main():
