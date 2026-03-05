@@ -1,9 +1,7 @@
 import os
-import sys
 import json
 import logging
 import subprocess  # nosec B404
-import time
 
 LOG = logging.getLogger(__name__)
 
@@ -125,16 +123,31 @@ class B2Client:
         if self._use_sdk:
             try:
                 downloaded = self._api.download_file_by_id(file_id)
+                # Preferred: DownloadedFile.save_to(dest_path)
                 if hasattr(downloaded, 'save_to'):
                     downloaded.save_to(dest_path)
                     return True
-                # Some SDK versions offer DownloadDestLocalFile helper
-                try:
-                    from b2sdk.v2 import DownloadDestLocalFile
-                    self._api.download_file_by_id(file_id, DownloadDestLocalFile(dest_path))
-                    return True
-                except Exception:
-                    LOG.exception('Unexpected SDK download_file_by_id shape')
+
+                # If the returned object is file-like, read bytes and write out
+                if hasattr(downloaded, 'read'):
+                    try:
+                        with open(dest_path, 'wb') as fh:
+                            fh.write(downloaded.read())
+                        return True
+                    except Exception:
+                        LOG.exception('Failed writing file-like download to disk')
+
+                # Some SDKs may expose get_bytes / get_contents
+                if hasattr(downloaded, 'get_bytes'):
+                    try:
+                        data = downloaded.get_bytes()
+                        with open(dest_path, 'wb') as fh:
+                            fh.write(data)
+                        return True
+                    except Exception:
+                        LOG.exception('Failed writing get_bytes() result to disk')
+
+                LOG.error('Downloaded object has no supported save method')
             except Exception:
                 LOG.exception('SDK download_file_version failed; falling back to CLI')
 
@@ -191,7 +204,7 @@ class B2Client:
         if self._use_sdk:
             LOG.info('Performing SDK-based integrity scan (upload-only)')
             had_failure = False
-            for root, dirs, files in os.walk(watch_dir):
+            for root, _dirs, files in os.walk(watch_dir):
                 for fname in files:
                     local_path = os.path.join(root, fname)
                     rel = os.path.relpath(local_path, watch_dir).replace('\\', '/')

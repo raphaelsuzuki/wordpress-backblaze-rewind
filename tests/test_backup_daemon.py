@@ -5,7 +5,6 @@ import types
 
 import pytest
 
-import b2_client
 import sys as _sys
 import types as _types
 
