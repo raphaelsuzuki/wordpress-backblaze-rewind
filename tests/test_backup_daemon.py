@@ -74,6 +74,8 @@ def test_upload_worker_retries_and_continues(tmp_path, monkeypatch):
     q.put({'action': 'upload', 'local_path': local, 'b2_dest': 'uploads/file.txt'})
     q.put(None)
 
+    # Ensure any previously cached client is cleared so our FakeClient is used
+    upload_worker._b2_client = None
     t = threading.Thread(target=upload_worker, args=(q, 'bucket', {}), daemon=True)
     t.start()
     t.join(timeout=5)

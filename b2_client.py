@@ -106,7 +106,17 @@ class B2Client:
             if 'fileName' in obj or 'name' in obj:
                 files = obj.get('files') if isinstance(obj.get('files'), list) else None
                 if files:
-                    versions.extend(files)
+                    for f in files:
+                        fname = f.get('fileName') or f.get('name')
+                        fid = f.get('fileId') or f.get('id')
+                        uts = f.get('uploadTimestamp') or f.get('time')
+                        action = f.get('action', 'upload')
+                        versions.append({
+                            'fileName': fname,
+                            'fileId': fid,
+                            'uploadTimestamp': uts,
+                            'action': action,
+                        })
                 else:
                     # Single file description
                     fname = obj.get('fileName', obj.get('name'))
