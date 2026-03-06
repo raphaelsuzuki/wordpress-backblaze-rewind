@@ -9,6 +9,7 @@ import datetime as dt
 import time
 
 from config_utils import load_config
+from b2_client import B2Client
 
 # Timeouts (seconds)
 SUBPROCESS_TIMEOUT_LIST = 120
@@ -16,61 +17,8 @@ SUBPROCESS_TIMEOUT_DOWNLOAD = 300
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def list_file_versions(bucket_name, prefix):
-    """
-    List all file versions from B2 bucket with specific prefix.
-    Handles pagination.
-    """
-    versions = []
-    start_file_name = None
-    start_file_id = None
-    
-    logging.info(f"Fetching file versions for b2://{bucket_name}/{prefix} ...")
-    
-    while True:
-        # B2 CLI command to list all file versions
-        cmd = ['b2', 'list-file-versions', bucket_name]
-        if start_file_name:
-            cmd.extend(['--startFileName', str(start_file_name)])
-            if start_file_id:
-                cmd.extend(['--startFileId', str(start_file_id)])
-                
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_LIST)  # nosec B603 B607 # NOSONAR
-            if result.returncode != 0:
-                logging.error(f"Failed to list file versions: {result.stderr}")
-                sys.exit(1)
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
-            logging.exception(f"Exception invoking b2 list-file-versions for bucket={bucket_name}: {e}")
-            sys.exit(1)
-            
-        try:
-            data = json.loads(result.stdout)
-            files = data.get('files', [])
-            
-            # Filter files by prefix and add to our list
-            # Match exact prefix or children under the prefix (avoid sibling matches)
-            def in_prefix(name, prefix):
-                if name == prefix:
-                    return True
-                return name.startswith(prefix + '/')
-
-            filtered_files = [f for f in files if in_prefix(f.get('fileName', ''), prefix)]
-            versions.extend(filtered_files)
-            
-            start_file_name = data.get('nextFileName')
-            start_file_id = data.get('nextFileId')
-            
-            # If no more files, break pagination loop
-            if not start_file_name:
-                break
-                
-        except json.JSONDecodeError as e:
-            logging.exception("Failed to parse JSON. This tool expects B2 CLI JSON output format.")
-            logging.error(f"CLI Output chunk: {result.stdout[:200]}")
-            sys.exit(1)
-            
-    return versions
+# Listing and download are now provided by b2_client.B2Client which prefers the SDK
+# but will fall back to the `b2` CLI if the SDK or credentials aren't available.
 
 def restore(target_date_str, restore_dir):
     try:
@@ -104,7 +52,12 @@ def restore(target_date_str, restore_dir):
         
     logging.info(f"Target date for restore: {target_dt} (Timestamp: {target_ts})")
     
-    versions = list_file_versions(bucket_name, prefix)
+    client = B2Client.from_config(config)
+    try:
+        versions = client.list_file_versions(bucket_name, prefix)
+    except Exception as e:
+        logging.exception(f"Failed to list file versions for {bucket_name}/{prefix}: {e}")
+        sys.exit(1)
     
     # Group file versions by their unique fileName
     file_history = {}
@@ -170,21 +123,20 @@ def restore(target_date_str, restore_dir):
             
         logging.info(f"Downloading {rel_name} (version: {file_id})")
 
-        cmd = ['b2', 'download-file-by-id', str(file_id), str(local_path)]
         max_retries = 5
         base_delay = 2
         success = False
 
         for attempt in range(max_retries):
             try:
-                download_result = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_DOWNLOAD)  # nosec B603 B607 # NOSONAR
-                if download_result.returncode == 0:
+                ok = client.download_file_version(file_id, local_path)
+                if ok:
                     logging.info(f"Downloaded {file_name} successfully")
                     success = True
                     break
                 else:
-                    logging.error(f"Failed to download {file_name} (rc={download_result.returncode}): {download_result.stderr}")
-            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+                    logging.error(f"Failed to download {file_name} via b2 client")
+            except Exception as e:
                 logging.exception(f"Exception during download attempt {attempt+1} for {file_name}: {e}")
 
             if attempt < max_retries - 1:
