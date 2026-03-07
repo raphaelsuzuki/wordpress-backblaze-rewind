@@ -26,6 +26,9 @@ from b2_client import B2Client
 SUBPROCESS_TIMEOUT_UPLOAD = 300
 SUBPROCESS_TIMEOUT_SYNC = 3600
 
+# Thread-local storage for B2 clients (one per worker thread)
+_thread_local = threading.local()
+
 
 def validate_config_for_daemon(config):
     """Ensure required config keys are present for the daemon to start."""
@@ -121,11 +124,11 @@ def upload_worker(upload_queue, bucket_name, config=None):
         max_retries = 5
         base_delay = 2
 
-        # Prefer SDK client if available; instantiate per worker on first use
-        client = getattr(upload_worker, '_b2_client', None)
-        if client is None:
-            client = B2Client.from_config(config or {})
-            upload_worker._b2_client = client
+        # Use thread-local client storage for thread safety
+        if not hasattr(_thread_local, 'b2_client') or _thread_local.b2_client is None:
+            _thread_local.b2_client = B2Client.from_config(config or {})
+        
+        client = _thread_local.b2_client
 
         for attempt in range(max_retries):
             try:
@@ -147,6 +150,8 @@ def upload_worker(upload_queue, bucket_name, config=None):
                 time.sleep(sleep_time)
             else:
                 logging.error(f"Max retries reached for {local_path}. Giving up.")
+                # Clear stale client on failure so next upload gets a fresh one
+                _thread_local.b2_client = None
 
         upload_queue.task_done()
 
