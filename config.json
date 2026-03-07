@@ -1,5 +1,8 @@
 {
     "bucket_name": "wp-media-backups",
     "watch_dir": "/var/www/html/wp-content/uploads",
-    "b2_path_prefix": "uploads"
+    "b2_path_prefix": "uploads",
+    "b2_account_id": "your-b2-account-id",
+    "b2_application_key": "your-b2-application-key",
+    "b2_client_ttl_seconds": 82800
 }

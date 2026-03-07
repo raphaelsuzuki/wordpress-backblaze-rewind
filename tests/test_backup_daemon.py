@@ -82,3 +82,41 @@ def test_upload_worker_retries_and_continues(tmp_path, monkeypatch):
     t.join(timeout=5)
 
     assert calls['n'] >= 2
+
+
+def test_upload_worker_refreshes_client_after_ttl(tmp_path, monkeypatch):
+    q = queue.Queue()
+
+    first = tmp_path / 'first.txt'
+    second = tmp_path / 'second.txt'
+    first.write_text('one')
+    second.write_text('two')
+
+    created = {'n': 0}
+    uploads = {'n': 0}
+
+    class FakeClient:
+        def upload_file(self, bucket_name, local_path, b2_dest):
+            uploads['n'] += 1
+            return True
+
+    def factory(cfg=None):
+        created['n'] += 1
+        return FakeClient()
+
+    monkeypatch.setattr('backup_daemon.B2Client', types.SimpleNamespace(from_config=factory))
+
+    # TTL=0 forces refresh before each task.
+    cfg = {'b2_client_ttl_seconds': 0}
+    q.put({'action': 'upload', 'local_path': str(first), 'b2_dest': 'uploads/first.txt'})
+    q.put({'action': 'upload', 'local_path': str(second), 'b2_dest': 'uploads/second.txt'})
+    q.put(None)
+
+    monkeypatch.setattr('backup_daemon._thread_local', types.SimpleNamespace())
+
+    t = threading.Thread(target=upload_worker, args=(q, 'bucket', cfg), daemon=True)
+    t.start()
+    t.join(timeout=5)
+
+    assert uploads['n'] == 2
+    assert created['n'] == 2
