@@ -1,9 +1,6 @@
 import os
-import sys
 import json
-import pytest
-from unittest.mock import Mock, MagicMock, patch, mock_open
-import subprocess
+from unittest.mock import Mock, patch
 
 import b2_client
 
@@ -11,7 +8,7 @@ import b2_client
 class TestB2ClientSDKPath:
     """Test B2Client using the SDK path (mocking b2sdk objects)."""
 
-    def test_from_config_initializes_sdk(self, monkeypatch):
+    def test_from_config_initializes_sdk(self):
         """Test that from_config creates SDK client when credentials are present."""
         mock_api = Mock()
         mock_info = Mock()
@@ -47,7 +44,7 @@ class TestB2ClientSDKPath:
             assert client._use_sdk is True
             mock_api.authorize_account.assert_called_once_with('production', 'env_id', 'env_key')
 
-    def test_from_config_falls_back_to_cli_on_sdk_failure(self, monkeypatch, caplog):
+    def test_from_config_falls_back_to_cli_on_sdk_failure(self, caplog):
         """Test that from_config falls back to CLI when SDK init fails."""
         mock_sdk_module = Mock()
         mock_sdk_module.InMemoryAccountInfo = Mock(side_effect=ImportError('no b2sdk'))
@@ -197,8 +194,17 @@ class TestB2ClientSDKPath:
         """Test sync returns False when any upload fails."""
         mock_api = Mock()
         mock_bucket = Mock()
-        # First upload succeeds, second fails
-        mock_bucket.upload_local_file.side_effect = [None, Exception('upload error')]
+        
+        # Use a callable to guarantee second call raises, independent of os.walk order
+        def raise_on_second_call(*args, **kwargs):
+            if not hasattr(raise_on_second_call, 'call_count'):
+                raise_on_second_call.call_count = 0
+            raise_on_second_call.call_count += 1
+            if raise_on_second_call.call_count == 2:
+                raise Exception('upload error')
+            return None
+        
+        mock_bucket.upload_local_file.side_effect = raise_on_second_call
         mock_api.get_bucket_by_name.return_value = mock_bucket
 
         watch_dir = tmp_path / 'watch'
@@ -222,7 +228,7 @@ class TestB2ClientCLIFallback:
         assert client._use_sdk is False
         assert client._api is None
 
-    def test_list_file_versions_cli_fallback(self, monkeypatch):
+    def test_list_file_versions_cli_fallback(self):
         """Test list_file_versions using CLI fallback."""
         client = b2_client.B2Client(sdk_api=None)
 
@@ -245,7 +251,7 @@ class TestB2ClientCLIFallback:
             assert 'bucket' in cmd
             assert 'pre' in cmd
 
-    def test_list_file_versions_cli_with_files_array(self, monkeypatch):
+    def test_list_file_versions_cli_with_files_array(self):
         """Test list_file_versions CLI when response contains 'files' array."""
         client = b2_client.B2Client(sdk_api=None)
 
@@ -331,7 +337,7 @@ class TestB2ClientCLIFallback:
             assert str(watch) in cmd
             assert 'b2://mybucket/prefix' in cmd
 
-    def test_cli_fallback_handles_errors(self):
+    def test_cli_fallback_handles_errors(self, tmp_path):
         """Test that CLI fallback logs and returns False on subprocess errors."""
         client = b2_client.B2Client(sdk_api=None)
 
@@ -340,5 +346,5 @@ class TestB2ClientCLIFallback:
         mock_result.stderr = 'b2 error'
 
         with patch('subprocess.run', return_value=mock_result):
-            result = client.download_file_version('badfile', '/tmp/out')
+            result = client.download_file_version('badfile', str(tmp_path / 'out'))
             assert result is False

@@ -150,6 +150,8 @@ def upload_worker(upload_queue, bucket_name, config=None):
                 time.sleep(sleep_time)
             else:
                 logging.error(f"Max retries reached for {local_path}. Giving up.")
+                # Clear stale client on failure so next upload gets a fresh one
+                _thread_local.b2_client = None
 
         upload_queue.task_done()
 
