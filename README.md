@@ -21,12 +21,22 @@ This system provides:
 pip3 install -r requirements.txt
 ```
 
-### 2. Configure B2 CLI Authorization
-Run the B2 CLI tool to authorize your account. The scripts rely on the B2 CLI's native configuration.
+### 2. Configure Credentials (SDK-first)
+The scripts now prefer the Backblaze SDK and will use these credentials first:
+- `b2_account_id`
+- `b2_application_key`
+
+You can provide them in `config.json` or through environment variables:
+- `B2_ACCOUNT_ID`
+- `B2_APPLICATION_KEY`
+
+If SDK credentials are not provided (or SDK init fails), the code falls back to the B2 CLI.
+
+Optional CLI fallback setup:
 ```bash
 b2 account authorize <applicationKeyId> <applicationKey>
 ```
-*Note: Make sure to authorize the B2 CLI under the same user that will run the daemon.*
+*Note: if using CLI fallback, authorize under the same OS user that runs the daemon.*
 
 ### 3. Update `config.json`
 Edit `config.json` with your details:
@@ -34,9 +44,14 @@ Edit `config.json` with your details:
 {
     "bucket_name": "your-bucket-name",
     "watch_dir": "/var/www/html/wp-content/uploads",
-    "b2_path_prefix": "uploads"
+   "b2_path_prefix": "uploads",
+   "b2_account_id": "your-b2-account-id",
+   "b2_application_key": "your-b2-application-key",
+   "b2_client_ttl_seconds": 82800
 }
 ```
+
+`b2_client_ttl_seconds` is optional and defaults to 23 hours (82800 seconds), which proactively refreshes per-thread clients before token staleness becomes a risk.
 
 ### 4. Install the Daemon (systemd)
 1. Copy the service template:

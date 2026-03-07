@@ -14,6 +14,12 @@ SYNC_TIMEOUT = 3600
 class B2Client:
     """Thin abstraction over the Backblaze B2 SDK with a CLI fallback.
 
+        SDK-first credential sources:
+            - config['b2_account_id'] / config['b2_application_key']
+            - env B2_ACCOUNT_ID / B2_APPLICATION_KEY
+
+        If SDK credentials are missing (or SDK init fails), CLI commands are used.
+
     Usage:
       client = B2Client.from_config(config)
       versions = client.list_file_versions(bucket, prefix)

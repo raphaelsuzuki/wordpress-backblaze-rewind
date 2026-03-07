@@ -29,6 +29,9 @@ SUBPROCESS_TIMEOUT_SYNC = 3600
 # Thread-local storage for B2 clients (one per worker thread)
 _thread_local = threading.local()
 
+# Refresh worker clients proactively before B2 auth tokens become stale.
+DEFAULT_B2_CLIENT_TTL_SECONDS = 23 * 60 * 60
+
 
 def validate_config_for_daemon(config):
     """Ensure required config keys are present for the daemon to start."""
@@ -108,6 +111,9 @@ class BackupHandler(FileSystemEventHandler):
 
 def upload_worker(upload_queue, bucket_name, config=None):
     """Processes uploads from the queue with exponential backoff retries."""
+    config = config or {}
+    client_ttl_seconds = int(config.get('b2_client_ttl_seconds', DEFAULT_B2_CLIENT_TTL_SECONDS))
+
     while True:
         task = upload_queue.get()
         if task is None:
@@ -124,9 +130,17 @@ def upload_worker(upload_queue, bucket_name, config=None):
         max_retries = 5
         base_delay = 2
 
-        # Use thread-local client storage for thread safety
-        if not hasattr(_thread_local, 'b2_client') or _thread_local.b2_client is None:
+        # Use thread-local client storage for thread safety and refresh periodically.
+        now = time.time()
+        client_age = now - getattr(_thread_local, 'b2_client_created_at', 0)
+        needs_client = (
+            not hasattr(_thread_local, 'b2_client') or
+            _thread_local.b2_client is None or
+            client_age >= client_ttl_seconds
+        )
+        if needs_client:
             _thread_local.b2_client = B2Client.from_config(config or {})
+            _thread_local.b2_client_created_at = now
         
         client = _thread_local.b2_client
 
@@ -152,6 +166,7 @@ def upload_worker(upload_queue, bucket_name, config=None):
                 logging.error(f"Max retries reached for {local_path}. Giving up.")
                 # Clear stale client on failure so next upload gets a fresh one
                 _thread_local.b2_client = None
+                _thread_local.b2_client_created_at = 0
 
         upload_queue.task_done()
 
