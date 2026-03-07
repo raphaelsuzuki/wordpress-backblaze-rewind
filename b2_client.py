@@ -103,29 +103,28 @@ class B2Client:
                 continue
 
             # b2 ls --json emits objects describing files; normalize to our shape
-            if 'fileName' in obj or 'name' in obj:
-                files = obj.get('files') if isinstance(obj.get('files'), list) else None
-                if files:
-                    for f in files:
-                        fname = f.get('fileName') or f.get('name')
-                        fid = f.get('fileId') or f.get('id')
-                        uts = f.get('uploadTimestamp') or f.get('time')
-                        action = f.get('action', 'upload')
-                        versions.append({
-                            'fileName': fname,
-                            'fileId': fid,
-                            'uploadTimestamp': uts,
-                            'action': action,
-                        })
-                else:
-                    # Single file description
-                    fname = obj.get('fileName', obj.get('name'))
+            # Handle files array first
+            if 'files' in obj and isinstance(obj.get('files'), list):
+                for f in obj['files']:
+                    fname = f.get('fileName') or f.get('name')
+                    fid = f.get('fileId') or f.get('id')
+                    uts = f.get('uploadTimestamp') or f.get('time')
+                    action = f.get('action', 'upload')
                     versions.append({
                         'fileName': fname,
-                        'fileId': obj.get('id') or obj.get('fileId'),
-                        'uploadTimestamp': obj.get('uploadTimestamp') or obj.get('time'),
-                        'action': obj.get('action', 'upload')
+                        'fileId': fid,
+                        'uploadTimestamp': uts,
+                        'action': action,
                     })
+            # Handle single file object
+            elif 'fileName' in obj or 'name' in obj:
+                fname = obj.get('fileName', obj.get('name'))
+                versions.append({
+                    'fileName': fname,
+                    'fileId': obj.get('id') or obj.get('fileId'),
+                    'uploadTimestamp': obj.get('uploadTimestamp') or obj.get('time'),
+                    'action': obj.get('action', 'upload')
+                })
 
         return versions
 
