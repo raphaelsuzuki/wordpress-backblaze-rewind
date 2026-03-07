@@ -21,7 +21,6 @@ class TestB2ClientSDKPath:
         mock_sdk_module.InMemoryAccountInfo = Mock(return_value=mock_info)
         mock_sdk_module.B2Api = Mock(return_value=mock_api)
 
-        import sys
         with patch.dict('sys.modules', {'b2sdk': Mock(), 'b2sdk.v2': mock_sdk_module}):
             config = {'b2_account_id': 'test_id', 'b2_application_key': 'test_key'}
             client = b2_client.B2Client.from_config(config)
